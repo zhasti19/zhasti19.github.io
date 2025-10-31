@@ -20,6 +20,18 @@ nav{
   z-index: 1000;
 }
 
+nav a{
+  color: white;
+  text-decoration: none;
+  margin: 0 20px;
+  font-weight: 500;
+  transition: opacity 0.2s ease;
+}
+
+nav a:hover {
+  opacity: 0.8;
+}
+
 /* Header Section*/
 header{
   background-color: #159957;
