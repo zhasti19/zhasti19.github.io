@@ -42,20 +42,18 @@ header {
   background-image: linear-gradient(120deg, #155799, #159957);
   color: white;
   text-align: center;
-  padding: 0;
+  padding: 60px 40px; /* now the background extends edge-to-edge */
   margin-top: 60px; /* offset for fixed navbar */
 }
 
 h1 {
   font-size: 2.8rem;
   margin-bottom: 0.5em;
-  padding: 40px;
 }
 
 p {
   font-size: 1.2rem;
   color: #e6edf3;
-  padding: 40px;
 }
 
 /* Main content */
