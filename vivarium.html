@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simplified Vivarium – Multi-Simulation Framework</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="vivarium.css">
+  <!-- Chart.js for live visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+</head>
+
+<body>
+  <!-- ── Navigation ── -->
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="fundamentals.html">Fundamentals of Biology</a>
+    <a href="vivarium.html">Vivarium Simulator</a>
+  </nav>
+
+  <!-- ── Header ── -->
+  <header>
+    <h1>Simplified Vivarium</h1>
+    <p class="header-subtitle">A modular multi-simulation framework for Synthetic Biology</p>
+  </header>
+
+  <!-- ── Intro ── -->
+  <section id="viv-intro" class="intro_text viv-section">
+    <h2>What is Vivarium?</h2>
+    <p>
+      <strong>Vivarium</strong> is an open-source framework for building and connecting biological simulations.
+      The key idea is <em>composability</em>: small, focused simulations (<strong>Processes</strong>) read and
+      write named variables through <strong>Ports</strong>, and those variables are stored in shared
+      <strong>Stores</strong>. Groups of Processes and Stores form <strong>Compartments</strong> (analogous to
+      a cell or organelle), and a top-level <strong>Simulation</strong> orchestrates multiple Compartments—each
+      running at its own time step.
+    </p>
+    <p>
+      This page presents a <em>simplified JavaScript implementation</em> of those concepts together with three
+      interactive example simulations you can run directly in your browser.
+    </p>
+  </section>
+
+  <!-- ── Architecture diagram ── -->
+  <section id="viv-arch" class="gen_text viv-section">
+    <h2>Framework Architecture</h2>
+    <div class="arch-diagram" role="img" aria-label="Architecture diagram showing Store, Process, Port, Compartment and Simulation">
+      <div class="arch-sim">
+        <span class="arch-label arch-label-sim">Simulation</span>
+        <div class="arch-compartments">
+          <!-- compartment 1 -->
+          <div class="arch-comp">
+            <span class="arch-label arch-label-comp">Compartment A</span>
+            <div class="arch-store">Store<br><small>variables</small></div>
+            <div class="arch-port">↔ Port</div>
+            <div class="arch-proc">Process<br><small>Δt = 0.5</small></div>
+            <div class="arch-port">↔ Port</div>
+            <div class="arch-proc">Process<br><small>Δt = 1.0</small></div>
+          </div>
+          <!-- connector -->
+          <div class="arch-connector">⇄<br><small>shared<br>variables</small></div>
+          <!-- compartment 2 -->
+          <div class="arch-comp">
+            <span class="arch-label arch-label-comp">Compartment B</span>
+            <div class="arch-store">Store<br><small>variables</small></div>
+            <div class="arch-port">↔ Port</div>
+            <div class="arch-proc">Process<br><small>Δt = 0.25</small></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Concept cards -->
+    <div class="concept-grid">
+      <div class="concept-card">
+        <h3>🗄️ Store</h3>
+        <p>Holds named state variables (e.g. population, ATP) and records their history at every global time step.</p>
+        <code>new Store({ population: 10, nutrients: 1000 })</code>
+      </div>
+      <div class="concept-card">
+        <h3>⚙️ Process</h3>
+        <p>Computes updates to store variables. Each Process has its own <em>time step</em> and fires only when
+           enough simulated time has accumulated.</p>
+        <code>new Process('Growth', ports, timestep, updateFn)</code>
+      </div>
+      <div class="concept-card">
+        <h3>🔌 Port</h3>
+        <p>A named connection that maps a logical port (used inside the Process) to a specific Store inside
+           the same Compartment. Ports decouple logic from storage layout.</p>
+        <code>ports = { cell: 'cellStore' }</code>
+      </div>
+      <div class="concept-card">
+        <h3>📦 Compartment</h3>
+        <p>Groups Stores and Processes together. Analogous to a cell or organelle—a self-contained simulation
+           unit with its own internal state.</p>
+        <code>new Compartment(name, stores, processes)</code>
+      </div>
+      <div class="concept-card">
+        <h3>🌐 Simulation</h3>
+        <p>Top-level orchestrator. Advances every Compartment by a global Δt and lets each Process fire at
+           whatever internal rate it needs.</p>
+        <code>new Simulation(compartments, dt)</code>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Simulations ── -->
+  <section id="viv-sims" class="gen_text viv-section">
+    <h2>Interactive Simulations</h2>
+    <p>
+      Each simulation below corresponds to a separate <strong>Compartment</strong> running inside a single
+      <strong>Simulation</strong>. Notice that each Compartment's Processes use different time steps—demonstrating
+      the multi-rate scheduling at the heart of Vivarium.
+    </p>
+
+    <!-- Global controls -->
+    <div class="sim-controls">
+      <button id="btn-run" class="btn btn-primary">▶ Run All</button>
+      <button id="btn-step" class="btn btn-secondary">⏭ Step</button>
+      <button id="btn-reset" class="btn btn-danger">↺ Reset</button>
+      <label for="global-dt">Global Δt:
+        <input id="global-dt" type="number" min="0.01" max="1" step="0.01" value="0.1">
+      </label>
+      <label for="run-duration">Duration:
+        <input id="run-duration" type="number" min="1" max="200" step="1" value="50">
+      </label>
+      <span id="sim-time" class="sim-time">t = 0.0</span>
+    </div>
+
+    <!-- Status log -->
+    <div id="sim-log" class="sim-log" aria-live="polite"></div>
+
+    <!-- Compartment cards -->
+    <div class="sim-grid">
+
+      <!-- Bacterial Growth -->
+      <div class="sim-card" id="card-bacteria">
+        <h3>🦠 Compartment: Bacterial Growth</h3>
+        <p class="sim-desc">
+          Logistic growth of a bacterial population depleting a nutrient supply.
+          The single <strong>Growth Process</strong> fires every
+          <strong>Δt = 1.0</strong> time unit.
+        </p>
+        <div class="port-table">
+          <div class="port-row header"><span>Port</span><span>Store</span><span>Variables</span></div>
+          <div class="port-row"><span>cell</span><span>cell</span><span>population, nutrients</span></div>
+        </div>
+        <canvas id="chart-bacteria" height="220"></canvas>
+      </div>
+
+      <!-- Gene Expression -->
+      <div class="sim-card" id="card-gene">
+        <h3>🧬 Compartment: Gene Expression</h3>
+        <p class="sim-desc">
+          mRNA is produced by <strong>Transcription</strong> (Δt = 0.5) and degraded.
+          Protein is synthesised by <strong>Translation</strong> (Δt = 1.0) from mRNA.
+          Two processes, two different time steps.
+        </p>
+        <div class="port-table">
+          <div class="port-row header"><span>Port</span><span>Store</span><span>Variables</span></div>
+          <div class="port-row"><span>gene</span><span>gene</span><span>mRNA, protein</span></div>
+        </div>
+        <canvas id="chart-gene" height="220"></canvas>
+      </div>
+
+      <!-- Metabolism -->
+      <div class="sim-card" id="card-metabolism">
+        <h3>⚡ Compartment: Metabolism</h3>
+        <p class="sim-desc">
+          <strong>Glycolysis</strong> (Δt = 0.25) converts glucose + ADP → ATP.
+          <strong>ATP Consumption</strong> (Δt = 0.5) breaks ATP back to ADP.
+          Three different time steps in one simulation.
+        </p>
+        <div class="port-table">
+          <div class="port-row header"><span>Port</span><span>Store</span><span>Variables</span></div>
+          <div class="port-row"><span>metabolites</span><span>metabolites</span><span>ATP, ADP, glucose</span></div>
+        </div>
+        <canvas id="chart-metabolism" height="220"></canvas>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Code walkthrough ── -->
+  <section id="viv-code" class="gen_text viv-section">
+    <h2>How to Use the Framework</h2>
+    <p>
+      The full source is in <a href="vivarium.js"><code>vivarium.js</code></a>. Below is a minimal
+      example showing how to wire up a custom simulation.
+    </p>
+    <pre class="code-block"><code>// 1. Create a Store with named variables
+const myStore = new Store({ glucose: 200, ATP: 10 });
+
+// 2. Define a Process with a port mapping and its own time step
+const glycolysis = new Process(
+  'Glycolysis',
+  { metabolites: 'myStore' },  // port → store name
+  0.25,                         // fires every 0.25 time units
+  (portState, dt) =&gt; {
+    const { glucose, ATP } = portState.metabolites;
+    return { metabolites: { glucose: -0.5 * dt, ATP: +1.0 * dt } };
+  }
+);
+
+// 3. Bundle into a Compartment
+const cell = new Compartment('Cell', { myStore }, [glycolysis]);
+
+// 4. Run inside a Simulation (global dt = 0.1)
+const sim = new Simulation({ cell }, 0.1);
+sim.run(50);   // 50 time units
+
+// 5. Read history from the store
+console.log(myStore.history.ATP);   // array of ATP values over time
+</code></pre>
+  </section>
+
+  <!-- ── Scripts ── -->
+  <script src="vivarium.js"></script>
+  <script>
+  // =========================================================================
+  // Page controller – wires the vivarium framework to the UI
+  // =========================================================================
+  (function () {
+    'use strict';
+
+    // ── Build simulation ──────────────────────────────────────────────────
+    let sim;
+    let chartBacteria, chartGene, chartMetabolism;
+    let animFrame = null;
+
+    function buildSim() {
+      const dt = parseFloat(document.getElementById('global-dt').value) || 0.1;
+      const bacteriaComp = buildBacterialGrowthCompartment({ timestep: 1.0 });
+      const geneComp     = buildGeneExpressionCompartment({ timestepFast: 0.5, timestepSlow: 1.0 });
+      const metComp      = buildMetabolicCompartment({ timestepFast: 0.25, timestepSlow: 0.5 });
+      sim = new Simulation(
+        { bacteria: bacteriaComp, gene: geneComp, metabolism: metComp },
+        dt
+      );
+    }
+
+    // ── Chart helpers ─────────────────────────────────────────────────────
+    function makeChart(canvasId, label, datasets) {
+      const ctx = document.getElementById(canvasId).getContext('2d');
+      return new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: datasets.map((d) => ({
+            label: d.label,
+            data: [],
+            borderColor: d.color,
+            backgroundColor: d.color + '22',
+            borderWidth: 2,
+            pointRadius: 0,
+            tension: 0.3,
+            fill: false,
+          })),
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          plugins: { legend: { position: 'top' } },
+          scales: {
+            x: { title: { display: true, text: 'Simulation time' } },
+            y: { title: { display: true, text: label }, beginAtZero: true },
+          },
+        },
+      });
+    }
+
+    function buildCharts() {
+      if (chartBacteria) { chartBacteria.destroy(); }
+      if (chartGene)     { chartGene.destroy(); }
+      if (chartMetabolism) { chartMetabolism.destroy(); }
+
+      chartBacteria = makeChart('chart-bacteria', 'Count / Amount', [
+        { label: 'Population',   color: '#2d6a4f' },
+        { label: 'Nutrients',    color: '#74c69d' },
+      ]);
+      chartGene = makeChart('chart-gene', 'Molecules', [
+        { label: 'mRNA',    color: '#1565c0' },
+        { label: 'Protein', color: '#42a5f5' },
+      ]);
+      chartMetabolism = makeChart('chart-metabolism', 'Concentration', [
+        { label: 'ATP',     color: '#e65100' },
+        { label: 'ADP',     color: '#ff9800' },
+        { label: 'Glucose', color: '#8d6e63' },
+      ]);
+    }
+
+    // Redraw charts from full store history
+    function refreshCharts() {
+      const ticks = sim.timeHistory.map((t) => t.toFixed(1));
+
+      const bStore = sim.compartments.bacteria.stores.cell;
+      chartBacteria.data.labels = ticks;
+      chartBacteria.data.datasets[0].data = bStore.history.population;
+      chartBacteria.data.datasets[1].data = bStore.history.nutrients;
+      chartBacteria.update('none');
+
+      const gStore = sim.compartments.gene.stores.gene;
+      chartGene.data.labels = ticks;
+      chartGene.data.datasets[0].data = gStore.history.mRNA;
+      chartGene.data.datasets[1].data = gStore.history.protein;
+      chartGene.update('none');
+
+      const mStore = sim.compartments.metabolism.stores.metabolites;
+      chartMetabolism.data.labels = ticks;
+      chartMetabolism.data.datasets[0].data = mStore.history.ATP;
+      chartMetabolism.data.datasets[1].data = mStore.history.ADP;
+      chartMetabolism.data.datasets[2].data = mStore.history.glucose;
+      chartMetabolism.update('none');
+    }
+
+    // ── Log helper ────────────────────────────────────────────────────────
+    function log(msg) {
+      const el = document.getElementById('sim-log');
+      el.textContent = msg;
+    }
+
+    function updateTimeDisplay() {
+      document.getElementById('sim-time').textContent = 't = ' + sim.time.toFixed(1);
+    }
+
+    // ── Button handlers ───────────────────────────────────────────────────
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+      document.getElementById('btn-run').textContent = '▶ Run All';
+      buildSim();
+      buildCharts();
+      refreshCharts();
+      updateTimeDisplay();
+      log('Simulation reset.');
+    });
+
+    document.getElementById('btn-step').addEventListener('click', () => {
+      sim.step();
+      refreshCharts();
+      updateTimeDisplay();
+      log('Single step executed. t = ' + sim.time.toFixed(2));
+    });
+
+    document.getElementById('btn-run').addEventListener('click', () => {
+      if (animFrame) {
+        // Pause
+        cancelAnimationFrame(animFrame);
+        animFrame = null;
+        document.getElementById('btn-run').textContent = '▶ Run All';
+        log('Paused at t = ' + sim.time.toFixed(2));
+        return;
+      }
+      // Start
+      document.getElementById('btn-run').textContent = '⏸ Pause';
+      const duration = parseFloat(document.getElementById('run-duration').value) || 50;
+      const endTime  = sim.time + duration;
+      let lastRefresh = 0;
+
+      function tick(ts) {
+        if (sim.time >= endTime) {
+          refreshCharts();
+          updateTimeDisplay();
+          document.getElementById('btn-run').textContent = '▶ Run All';
+          log('Simulation complete. t = ' + sim.time.toFixed(2));
+          animFrame = null;
+          return;
+        }
+        // Run ~20 global steps per animation frame for smooth visuals
+        for (let i = 0; i < 20 && sim.time < endTime; i++) {
+          sim.step();
+        }
+        if (ts - lastRefresh > 60) {
+          refreshCharts();
+          updateTimeDisplay();
+          lastRefresh = ts;
+        }
+        animFrame = requestAnimationFrame(tick);
+      }
+
+      animFrame = requestAnimationFrame(tick);
+    });
+
+    // ── Init ──────────────────────────────────────────────────────────────
+    buildSim();
+    buildCharts();
+    refreshCharts();
+    updateTimeDisplay();
+    log('Framework ready. Press ▶ Run All or ⏭ Step to start.');
+  }());
+  </script>
+
+</body>
+</html>

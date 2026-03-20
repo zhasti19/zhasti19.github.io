@@ -70,3 +70,15 @@ header h1 {
 #learn_more a:hover {
   opacity: 0.8;
 }
+
+/*Vivarium Link Section*/
+#vivarium_link a{
+  color: #157878;
+  text-decoration: none;
+  font-weight: 500;
+  transition: opacity 0.2s ease;
+}
+
+#vivarium_link a:hover {
+  opacity: 0.8;
+}
