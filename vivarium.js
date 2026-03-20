@@ -1,6 +1,6 @@
 /**
  * vivarium.js
- * A simplified multi-simulation framework inspired by Vivarium.
+ * A simplified multi-scale simulation framework inspired by Vivarium.
  *
  * Core concepts:
  *   Store       – holds named state variables and their history
@@ -438,7 +438,7 @@ class SimProcess {
    * @param {number} dt       Elapsed time (equals timeStep on normal runs)
    * @returns {Object}        Updated port values { portName: newValue }
    */
-  next(inputs, dt) { return {}; } // eslint-disable-line no-unused-vars
+  next(_inputs, _dt) { return {}; }
 
   /** Optional: return initial state contributions merged into the Vivarium store */
   initialState() { return {}; }
