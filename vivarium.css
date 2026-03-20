@@ -1,0 +1,291 @@
+/* ============================================================
+   vivarium.css  –  styles for the multi-scale simulation page
+   ============================================================ */
+
+/* ── Section spacing ── */
+.viv-section {
+  max-width: 1100px;
+  margin: 30px auto;
+  padding: 0 24px 24px;
+}
+
+/* ── Header subtitle ── */
+.header-subtitle {
+  margin: 0;
+  padding-bottom: 12px;
+  font-size: 1rem;
+  opacity: 0.9;
+  font-weight: 400;
+}
+
+/* ── Architecture diagram ── */
+.arch-diagram {
+  background: #f0f4f8;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+}
+
+.arch-sim {
+  border: 2px solid #157878;
+  border-radius: 8px;
+  padding: 12px;
+  position: relative;
+}
+
+.arch-label {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+.arch-label-sim  { background: #157878; color: #fff; }
+.arch-label-comp { background: #1565c0; color: #fff; }
+
+.arch-compartments {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.arch-comp {
+  border: 2px solid #1565c0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+}
+
+.arch-store {
+  background: #e8f5e9;
+  border: 1px solid #66bb6a;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  text-align: center;
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.arch-port {
+  color: #888;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.arch-proc {
+  background: #e3f2fd;
+  border: 1px solid #64b5f6;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  text-align: center;
+  color: #1565c0;
+  font-weight: 600;
+}
+
+.arch-connector {
+  font-size: 1.6rem;
+  color: #157878;
+  text-align: center;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.arch-connector small {
+  display: block;
+  font-size: 0.7rem;
+  color: #555;
+}
+
+/* ── Concept cards ── */
+.concept-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.concept-card {
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.concept-card h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.concept-card p {
+  margin: 0 0 10px;
+  font-size: 0.88rem;
+  color: #555;
+}
+
+.concept-card code {
+  display: block;
+  font-size: 0.78rem;
+  background: #f6f8fa;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #e1e4e8;
+  word-break: break-all;
+  color: #157878;
+}
+
+/* ── Simulation controls ── */
+.sim-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+}
+
+.btn {
+  padding: 7px 18px;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.btn:hover  { opacity: 0.85; transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+
+.btn-primary   { background: #157878; color: #fff; }
+.btn-secondary { background: #1565c0; color: #fff; }
+.btn-danger    { background: #c62828; color: #fff; }
+
+.sim-controls label {
+  font-size: 0.88rem;
+  color: #444;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sim-controls input[type="number"] {
+  width: 68px;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.88rem;
+}
+
+.sim-time {
+  margin-left: auto;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #157878;
+  white-space: nowrap;
+}
+
+/* ── Log ── */
+.sim-log {
+  background: #f0f4f8;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  color: #444;
+  margin-bottom: 16px;
+  min-height: 36px;
+}
+
+/* ── Simulation card grid ── */
+.sim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.sim-card {
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+}
+
+.sim-card h3 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+  color: #24292e;
+}
+
+.sim-desc {
+  font-size: 0.88rem;
+  color: #555;
+  margin-bottom: 12px;
+}
+
+/* ── Port table ── */
+.port-table {
+  font-size: 0.8rem;
+  border: 1px solid #e1e4e8;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.port-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr;
+  padding: 4px 8px;
+  border-bottom: 1px solid #e1e4e8;
+  gap: 4px;
+}
+
+.port-row:last-child { border-bottom: none; }
+
+.port-row.header {
+  background: #f6f8fa;
+  font-weight: 700;
+  color: #24292e;
+}
+
+/* ── Code block ── */
+.code-block {
+  background: #0d1117;
+  color: #c9d1d9;
+  border-radius: 8px;
+  padding: 20px 24px;
+  overflow-x: auto;
+  font-size: 0.87rem;
+  line-height: 1.6;
+  border: 1px solid #30363d;
+}
+
+.code-block code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+/* ── Responsive tweaks ── */
+@media (max-width: 600px) {
+  .arch-compartments { flex-direction: column; }
+  .arch-connector     { transform: rotate(90deg); }
+  .concept-grid       { grid-template-columns: 1fr; }
+  .sim-grid           { grid-template-columns: 1fr; }
+}
