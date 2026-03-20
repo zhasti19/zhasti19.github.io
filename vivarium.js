@@ -1,29 +1,355 @@
 /**
- * MiniVivarium – A simplified vivarium-inspired simulation framework
+ * vivarium.js
+ * A simplified multi-simulation framework inspired by Vivarium.
  *
- * Connects multiple biological simulations (processes) that run at different
- * time scales through a shared hierarchical state store. Processes declare
- * their variable dependencies via port mappings, enabling modular composition
- * without tight coupling.
+ * Core concepts:
+ *   Store       – holds named state variables and their history
+ *   Process     – runs a simulation step at its own time step, reads/writes
+ *                 stores through declared ports
+ *   Compartment – groups stores and processes; handles stepping
+ *   Simulation  – top-level orchestrator for one or more compartments
  *
- * Inspired by: vivarium-core (https://github.com/vivarium-collective/vivarium-core)
- *
- * Core classes:
- *   Store        – hierarchical key-value state store
- *   Process      – base class for a simulation step (override next())
- *   Compartment  – named container grouping related state and processes
- *   Vivarium     – composer that manages all processes and advances time
+ * Extended API (hierarchical path-based store):
+ *   HierarchicalStore – deep key-path state store
+ *   SimProcess        – abstract base class for processes (override next())
+ *   Vivarium          – event-driven composer using HierarchicalStore
  */
 
-'use strict';
+// ---------------------------------------------------------------------------
+// Store  (flat key → value, used by Simulation)
+// ---------------------------------------------------------------------------
+class Store {
+  /**
+   * @param {Object.<string, number>} initialValues  variable name → initial value
+   */
+  constructor(initialValues) {
+    this.variables = Object.assign({}, initialValues);
+    // history[varName] = [value at t0, value at t1, …]
+    this.history = {};
+    for (const [k, v] of Object.entries(initialValues)) {
+      this.history[k] = [v];
+    }
+  }
 
-/* ─── Internal utilities ─────────────────────────────────────────────────── */
+  /** Read a variable by name */
+  get(key) {
+    return this.variables[key];
+  }
 
-function _deepCopy(obj) {
-  return JSON.parse(JSON.stringify(obj));
+  /** Overwrite a variable */
+  set(key, value) {
+    this.variables[key] = value;
+  }
+
+  /** Add deltas to existing values (clamp at 0 by default) */
+  update(deltas, clampAtZero = true) {
+    for (const [k, delta] of Object.entries(deltas)) {
+      if (k in this.variables) {
+        const next = this.variables[k] + delta;
+        this.variables[k] = clampAtZero ? Math.max(0, next) : next;
+      }
+    }
+  }
+
+  /** Save current values to history (called once per global dt) */
+  snapshot() {
+    for (const k of Object.keys(this.variables)) {
+      this.history[k].push(this.variables[k]);
+    }
+  }
 }
 
-function _deepGet(obj, path) {
+// ---------------------------------------------------------------------------
+// Process  (used by Simulation – concrete, takes an updateFn)
+// ---------------------------------------------------------------------------
+class Process {
+  /**
+   * @param {string}   name       Human-readable label
+   * @param {Object.<string,string>} ports  portName → storeName mapping
+   * @param {number}   timestep   How often (in simulation time) this process fires
+   * @param {function} updateFn   (portState, dt) → {portName: {varName: delta, …}, …}
+   */
+  constructor(name, ports, timestep, updateFn) {
+    this.name = name;
+    this.ports = ports;
+    this.timestep = timestep;
+    this.updateFn = updateFn;
+    this._accumulated = 0;
+  }
+
+  /**
+   * Advance by globalDt. Fires updateFn when accumulated time ≥ own timestep.
+   * @param {number}                   globalDt
+   * @param {Object.<string, Store>}   stores    all stores in the compartment
+   */
+  step(globalDt, stores) {
+    this._accumulated += globalDt;
+    if (this._accumulated < this.timestep) return;
+
+    // Build port-keyed state snapshot for the update function
+    const portState = {};
+    for (const [portName, storeName] of Object.entries(this.ports)) {
+      if (stores[storeName]) {
+        portState[portName] = Object.assign({}, stores[storeName].variables);
+      }
+    }
+
+    const updates = this.updateFn(portState, this.timestep);
+
+    // Apply updates back to the appropriate stores
+    if (updates) {
+      for (const [portName, deltas] of Object.entries(updates)) {
+        const storeName = this.ports[portName];
+        if (storeName && stores[storeName] && deltas) {
+          stores[storeName].update(deltas);
+        }
+      }
+    }
+
+    this._accumulated -= this.timestep;
+  }
+
+  /** Reset accumulated time (useful when restarting a simulation) */
+  reset() {
+    this._accumulated = 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Compartment  (used by Simulation)
+// ---------------------------------------------------------------------------
+class Compartment {
+  /**
+   * @param {string}                   name
+   * @param {Object.<string, Store>}   stores     storeName → Store
+   * @param {Process[]}                processes
+   */
+  constructor(name, stores, processes) {
+    this.name = name;
+    this.stores = stores;
+    this.processes = processes;
+  }
+
+  /** Advance all processes then snapshot all stores */
+  step(globalDt) {
+    for (const process of this.processes) {
+      process.step(globalDt, this.stores);
+    }
+    for (const store of Object.values(this.stores)) {
+      store.snapshot();
+    }
+  }
+
+  /** Reset processes and clear store history back to current values */
+  reset() {
+    for (const process of this.processes) {
+      process.reset();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Simulation  (top-level orchestrator using global dt + compartments)
+// ---------------------------------------------------------------------------
+class Simulation {
+  /**
+   * @param {Object.<string, Compartment>} compartments
+   * @param {number}                        dt   Global (minimum) time step
+   */
+  constructor(compartments, dt = 0.1) {
+    this.compartments = compartments;
+    this.dt = dt;
+    this.time = 0;
+    this.timeHistory = [0];
+  }
+
+  /** Run a single global time step across every compartment */
+  step() {
+    for (const compartment of Object.values(this.compartments)) {
+      compartment.step(this.dt);
+    }
+    this.time = parseFloat((this.time + this.dt).toFixed(10));
+    this.timeHistory.push(this.time);
+  }
+
+  /** Run for `duration` simulation time units */
+  run(duration) {
+    const steps = Math.round(duration / this.dt);
+    for (let i = 0; i < steps; i++) {
+      this.step();
+    }
+  }
+
+  /** Reset simulation back to t=0 */
+  reset() {
+    this.time = 0;
+    this.timeHistory = [0];
+    for (const compartment of Object.values(this.compartments)) {
+      compartment.reset();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in example simulations
+// ---------------------------------------------------------------------------
+
+/**
+ * buildBacterialGrowthCompartment
+ * Models a bacterial population consuming nutrients with logistic growth.
+ * Stores : { cell: { population, nutrients } }
+ * Process: growthProcess (timestep = 1.0)
+ */
+function buildBacterialGrowthCompartment(opts = {}) {
+  const {
+    initialPopulation = 10,
+    initialNutrients = 1000,
+    growthRate = 0.3,
+    yieldCoeff = 0.5,
+    carryingCapacity = 500,
+    timestep = 1.0,
+  } = opts;
+
+  const cellStore = new Store({
+    population: initialPopulation,
+    nutrients: initialNutrients,
+  });
+
+  const growthProcess = new Process(
+    'Bacterial Growth',
+    { cell: 'cell' },
+    timestep,
+    (state, dt) => {
+      const { population, nutrients } = state.cell;
+      const nutrientFraction = Math.max(0, nutrients / (nutrients + 100));
+      const logisticFactor = Math.max(0, 1 - population / carryingCapacity);
+      const growth = growthRate * population * nutrientFraction * logisticFactor * dt;
+      return {
+        cell: {
+          population: growth,
+          nutrients: -growth / yieldCoeff,
+        },
+      };
+    }
+  );
+
+  return new Compartment('Bacterial Growth', { cell: cellStore }, [growthProcess]);
+}
+
+/**
+ * buildGeneExpressionCompartment
+ * Models mRNA transcription and protein translation/degradation.
+ * Stores : { gene: { mRNA, protein } }
+ * Process: transcription (timestep = 0.5), translation (timestep = 1.0)
+ */
+function buildGeneExpressionCompartment(opts = {}) {
+  const {
+    mRNAInit = 0,
+    proteinInit = 0,
+    transcriptionRate = 5,
+    mRNADegradation = 0.3,
+    translationRate = 2,
+    proteinDegradation = 0.05,
+    timestepFast = 0.5,
+    timestepSlow = 1.0,
+  } = opts;
+
+  const geneStore = new Store({ mRNA: mRNAInit, protein: proteinInit });
+
+  const transcriptionProcess = new Process(
+    'Transcription',
+    { gene: 'gene' },
+    timestepFast,
+    (state, dt) => {
+      const { mRNA } = state.gene;
+      const dmRNA = (transcriptionRate - mRNADegradation * mRNA) * dt;
+      return { gene: { mRNA: dmRNA } };
+    }
+  );
+
+  const translationProcess = new Process(
+    'Translation',
+    { gene: 'gene' },
+    timestepSlow,
+    (state, dt) => {
+      const { mRNA, protein } = state.gene;
+      const dProtein = (translationRate * mRNA - proteinDegradation * protein) * dt;
+      return { gene: { protein: dProtein } };
+    }
+  );
+
+  return new Compartment(
+    'Gene Expression',
+    { gene: geneStore },
+    [transcriptionProcess, translationProcess]
+  );
+}
+
+/**
+ * buildMetabolicCompartment
+ * Simple ATP production / consumption model.
+ * Stores : { metabolites: { ATP, ADP, glucose } }
+ * Process: glycolysis (timestep = 0.25), consumption (timestep = 0.5)
+ */
+function buildMetabolicCompartment(opts = {}) {
+  const {
+    initialATP = 10,
+    initialADP = 5,
+    initialGlucose = 200,
+    glycolysisRate = 0.8,
+    consumptionRate = 0.3,
+    timestepFast = 0.25,
+    timestepSlow = 0.5,
+  } = opts;
+
+  const metStore = new Store({
+    ATP: initialATP,
+    ADP: initialADP,
+    glucose: initialGlucose,
+  });
+
+  const glycolysisProcess = new Process(
+    'Glycolysis',
+    { metabolites: 'metabolites' },
+    timestepFast,
+    (state, dt) => {
+      const { glucose, ADP } = state.metabolites;
+      const flux = glycolysisRate * Math.min(glucose, ADP) * dt;
+      return {
+        metabolites: { ATP: flux * 2, ADP: -flux * 2, glucose: -flux },
+      };
+    }
+  );
+
+  const consumptionProcess = new Process(
+    'ATP Consumption',
+    { metabolites: 'metabolites' },
+    timestepSlow,
+    (state, dt) => {
+      const { ATP } = state.metabolites;
+      const consumed = consumptionRate * ATP * dt;
+      return {
+        metabolites: { ATP: -consumed, ADP: consumed },
+      };
+    }
+  );
+
+  return new Compartment(
+    'Metabolism',
+    { metabolites: metStore },
+    [glycolysisProcess, consumptionProcess]
+  );
+}
+
+// ===========================================================================
+// Extended API  –  hierarchical path-based store + event-driven composer
+// ===========================================================================
+
+// ── Internal utilities ──────────────────────────────────────────────────────
+
+function _hDeepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+function _hDeepGet(obj, path) {
   let cur = obj;
   for (const key of path) {
     if (cur === undefined || cur === null) return undefined;
@@ -32,111 +358,72 @@ function _deepGet(obj, path) {
   return cur;
 }
 
-function _deepSet(obj, path, value) {
-  const result = _deepCopy(obj);
+function _hDeepSet(obj, path, value) {
+  const result = _hDeepCopy(obj);
   let cur = result;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
-    if (typeof cur[key] !== 'object' || cur[key] === null) {
-      cur[key] = {};
-    }
+    if (typeof cur[key] !== 'object' || cur[key] === null) cur[key] = {};
     cur = cur[key];
   }
   cur[path[path.length - 1]] = value;
   return result;
 }
 
-/* ─── Store ──────────────────────────────────────────────────────────────── */
-
 /**
- * Store – Hierarchical state storage
- *
- * The central repository shared by all processes.  Processes read and write
- * state through port declarations that map port names to paths inside the
- * store.
+ * HierarchicalStore – nested key-path state store used by Vivarium.
  *
  * @example
- * const store = new Store({
- *   cell:       { volume: 1.0 },
- *   metabolism: { atp: 2.0, glucose: 10.0 }
- * });
- *
- * store.get(['cell', 'volume']);        // → 1.0
- * store.set(['cell', 'volume'], 1.5);
- * store.getState();                     // full snapshot
+ * const store = new HierarchicalStore({ cell: { volume: 1.0 } });
+ * store.get(['cell', 'volume']);     // → 1.0
+ * store.set(['cell', 'volume'], 2);
  */
-class Store {
-  /**
-   * @param {Object} [initialState={}] Initial state tree
-   */
+class HierarchicalStore {
   constructor(initialState = {}) {
-    this._state = _deepCopy(initialState);
+    this._state = _hDeepCopy(initialState);
   }
 
-  /**
-   * Read a value from the store.
-   * @param {string[]} path  e.g. ['cell', 'volume']
-   * @returns {*}
-   */
+  /** Read a value at the given path array, e.g. ['cell', 'volume'] */
   get(path) {
-    if (!path || path.length === 0) return _deepCopy(this._state);
-    return _deepGet(this._state, path);
+    if (!path || path.length === 0) return _hDeepCopy(this._state);
+    return _hDeepGet(this._state, path);
   }
 
-  /**
-   * Write a value into the store.
-   * @param {string[]} path
-   * @param {*} value
-   */
+  /** Write a value at the given path */
   set(path, value) {
-    this._state = _deepSet(this._state, path, value);
+    this._state = _hDeepSet(this._state, path, value);
   }
 
-  /**
-   * Return a deep copy of the full state tree.
-   * @returns {Object}
-   */
-  getState() {
-    return _deepCopy(this._state);
-  }
+  /** Return a deep copy of the full state tree */
+  getState() { return _hDeepCopy(this._state); }
 }
 
-/* ─── Process ────────────────────────────────────────────────────────────── */
-
 /**
- * Process – Base class for all simulation processes
+ * SimProcess – abstract base class for event-driven processes used by Vivarium.
  *
- * A Process encapsulates one unit of computation.  It declares which store
- * variables it needs (ports), runs at its own time step, and produces
- * updated variable values each time it fires.
- *
- * Subclass Process and override `next()` to implement custom logic.
+ * Subclass and override `next(inputs, dt)` to define your process logic.
  *
  * @example
- * class CellGrowth extends Process {
+ * class CellGrowth extends SimProcess {
  *   constructor() {
  *     super({
  *       name: 'CellGrowth',
- *       ports: {
- *         volume: ['cell', 'volume'],  // port name → store path
- *         atp:    ['metabolism', 'atp'],
- *       },
- *       timeStep: 1.0   // fires every 1.0 time unit
+ *       ports: { volume: ['cell', 'volume'], atp: ['metabolism', 'atp'] },
+ *       timeStep: 1.0
  *     });
  *   }
- *
  *   next(inputs, dt) {
- *     const growthRate = 0.01 * inputs.atp / (0.5 + inputs.atp);
- *     return { volume: inputs.volume * (1 + growthRate * dt) };
+ *     const mu = 0.015 * inputs.atp / (1 + inputs.atp);
+ *     return { volume: inputs.volume * (1 + mu * dt) };
  *   }
  * }
  */
-class Process {
+class SimProcess {
   /**
-   * @param {Object}   config
-   * @param {string}   config.name              Display name for this process
-   * @param {Object}   config.ports             Port map: { portName: storePath[] }
-   * @param {number}   [config.timeStep=1.0]    How often (time units) this process fires
+   * @param {Object} config
+   * @param {string} config.name       Display name
+   * @param {Object} config.ports      { portName: storePath[] } – port → path in HierarchicalStore
+   * @param {number} [config.timeStep=1.0]  How often (time units) this process fires
    */
   constructor({ name, ports = {}, timeStep = 1.0 }) {
     this.name = name;
@@ -146,210 +433,94 @@ class Process {
   }
 
   /**
-   * Compute the next state for this process.
-   *
-   * Override this method in your subclass.
-   *
-   * @param {Object} inputs  Current values of all declared ports { portName: value }
-   * @param {number} dt      Elapsed time since the last run (equals timeStep normally)
-   * @returns {Object}       Updated port values { portName: newValue }
+   * Compute the next state.  Override in subclasses.
+   * @param {Object} inputs   Current port values { portName: value }
+   * @param {number} dt       Elapsed time (equals timeStep on normal runs)
+   * @returns {Object}        Updated port values { portName: newValue }
    */
-  next(inputs, dt) { // eslint-disable-line no-unused-vars
-    return {};
-  }
+  next(inputs, dt) { return {}; } // eslint-disable-line no-unused-vars
 
-  /**
-   * Optional: return initial state contributions for this process.
-   * The returned object is merged into the store before the first step.
-   * @returns {Object}
-   */
-  initialState() {
-    return {};
-  }
+  /** Optional: return initial state contributions merged into the Vivarium store */
+  initialState() { return {}; }
 }
 
-/* ─── Compartment ────────────────────────────────────────────────────────── */
-
 /**
- * Compartment – A named container grouping related state and processes
+ * Vivarium – event-driven multi-timescale simulation composer.
  *
- * Compartments organise the simulation hierarchy.  Each compartment owns a
- * section of the state store (keyed by its name) and a set of processes.
- * Processes inside a compartment can still share variables across compartment
- * boundaries by pointing their port paths anywhere in the store.
- *
- * @example
- * const metabolismCompartment = new Compartment({
- *   name: 'metabolism',
- *   initialState: { glucose: 10.0, atp: 2.0, lactate: 0.0 },
- *   processes: [new MetabolismProcess()]
- * });
- */
-class Compartment {
-  /**
-   * @param {Object}    config
-   * @param {string}    config.name                     Compartment name (store namespace)
-   * @param {Object}    [config.initialState={}]        Initial values under this namespace
-   * @param {Process[]} [config.processes=[]]           Processes belonging to this compartment
-   */
-  constructor({ name, initialState = {}, processes = [] }) {
-    this.name = name;
-    this.initialState = initialState;
-    this.processes = processes;
-  }
-}
-
-/* ─── Vivarium ───────────────────────────────────────────────────────────── */
-
-/**
- * Vivarium – Multi-timescale simulation composer
- *
- * The Vivarium wires together multiple processes (each with its own time
- * step) through a shared Store.  On every `step()` the process with the
- * earliest scheduled run time fires; the simulator advances to that instant
- * and records the current state.
- *
- * Key features:
- *   • Different time steps per process
- *   • Shared variables through port declarations
- *   • Compartments for logical organisation
- *   • History recording for tracked paths
+ * Connects multiple SimProcess instances (possibly in different Compartments)
+ * each running at its own time step through a shared HierarchicalStore.
  *
  * @example
  * const sim = new Vivarium({
- *   state: {
- *     cell:       { volume: 1.0 },
- *     metabolism: { atp: 2.0, glucose: 10.0 }
- *   },
- *   processes:   [new CellGrowth(), new Metabolism()],
- *   trackPaths:  [['cell', 'volume'], ['metabolism', 'atp']]
+ *   state: { cell: { volume: 1.0 }, metabolism: { atp: 2.0, glucose: 10.0 } },
+ *   processes: [new CellGrowth(), new Metabolism()],
+ *   trackPaths: [['cell', 'volume'], ['metabolism', 'atp']]
  * });
- *
- * const history = sim.run(60);  // simulate 60 time units
- * console.log(history.time);            // [0, 0.5, 1.0, ...]
- * console.log(history['cell.volume']);   // [1.0, 1.01, ...]
+ * const history = sim.run(60);
+ * // history = { time: [...], 'cell.volume': [...], 'metabolism.atp': [...] }
  */
 class Vivarium {
   /**
-   * @param {Object}         config
-   * @param {Object}         [config.state={}]          Top-level initial state
-   * @param {Compartment[]}  [config.compartments=[]]   Compartments to merge in
-   * @param {Process[]}      [config.processes=[]]      Additional top-level processes
-   * @param {string[][]}     [config.trackPaths=[]]     Store paths to record in history
+   * @param {Object}        config
+   * @param {Object}        [config.state={}]          Top-level initial state
+   * @param {Object[]}      [config.compartments=[]]   Compartment descriptors { name, initialState, processes }
+   * @param {SimProcess[]}  [config.processes=[]]      Additional top-level processes
+   * @param {string[][]}    [config.trackPaths=[]]     Store paths to record in history
    */
   constructor({ state = {}, compartments = [], processes = [], trackPaths = [] }) {
-    // Merge compartment initial states into the shared store
-    let mergedState = _deepCopy(state);
+    let mergedState = _hDeepCopy(state);
     const allProcesses = [...processes];
 
-    for (const compartment of compartments) {
-      mergedState[compartment.name] = Object.assign(
+    for (const comp of compartments) {
+      mergedState[comp.name] = Object.assign(
         {},
-        compartment.initialState,
-        mergedState[compartment.name] || {}
+        comp.initialState || {},
+        mergedState[comp.name] || {}
       );
-      allProcesses.push(...compartment.processes);
+      if (comp.processes) allProcesses.push(...comp.processes);
     }
 
-    this.store = new Store(mergedState);
+    this.store = new HierarchicalStore(mergedState);
     this.processes = allProcesses;
     this._time = 0;
     this._trackPaths = trackPaths;
 
-    // Initialise history with time=0 snapshot
     this._history = { time: [0] };
     for (const path of trackPaths) {
-      const key = path.join('.');
-      this._history[key] = [this.store.get(path)];
+      this._history[path.join('.')] = [this.store.get(path)];
     }
 
-    // All processes start at time 0
-    for (const p of this.processes) {
-      p._nextRunTime = 0;
-    }
+    for (const p of this.processes) p._nextRunTime = 0;
   }
 
-  /** @returns {number} Current simulation time */
+  /** Current simulation time */
   get time() { return this._time; }
 
-  /**
-   * Advance the simulation by exactly one event – the next scheduled process.
-   */
+  /** Advance by one event (smallest next scheduled process time) */
   step() {
-    const nextTime = this._nextEventTime();
+    const nextTime = this.processes.length
+      ? Math.min(...this.processes.map(p => p._nextRunTime))
+      : this._time + 1;
 
-    for (const process of this.processes) {
-      // Use a small epsilon to handle floating-point accumulation
-      if (process._nextRunTime <= nextTime + 1e-10) {
-        const inputs = this._gatherInputs(process);
-        const outputs = process.next(inputs, process.timeStep);
-        this._applyOutputs(process, outputs);
-        process._nextRunTime += process.timeStep;
+    for (const proc of this.processes) {
+      if (proc._nextRunTime <= nextTime + 1e-10) {
+        const inputs = {};
+        for (const [pn, sp] of Object.entries(proc.ports)) {
+          inputs[pn] = this.store.get(sp);
+        }
+        const outputs = proc.next(inputs, proc.timeStep);
+        if (outputs) {
+          for (const [pn, val] of Object.entries(outputs)) {
+            if (val !== undefined && val !== null && proc.ports[pn]) {
+              this.store.set(proc.ports[pn], val);
+            }
+          }
+        }
+        proc._nextRunTime += proc.timeStep;
       }
     }
 
     this._time = nextTime;
-    this._recordHistory();
-  }
-
-  /**
-   * Run the simulation for `totalTime` time units.
-   * @param {number} totalTime   Duration to simulate
-   * @param {number} [maxSteps=100000]  Safety cap on iterations
-   * @returns {Object}  History object: { time: [...], 'store.path': [...], ... }
-   */
-  run(totalTime, maxSteps = 100000) {
-    const endTime = this._time + totalTime;
-    let steps = 0;
-    while (this._time < endTime - 1e-10 && steps < maxSteps) {
-      this.step();
-      steps++;
-    }
-    return this.getHistory();
-  }
-
-  /**
-   * Return a deep copy of the recorded history.
-   * @returns {Object}
-   */
-  getHistory() {
-    return _deepCopy(this._history);
-  }
-
-  /**
-   * Return the current full state of the store.
-   * @returns {Object}
-   */
-  getState() {
-    return this.store.getState();
-  }
-
-  /* ── Private helpers ──────────────────────────────────────────────────── */
-
-  _nextEventTime() {
-    if (this.processes.length === 0) return this._time + 1;
-    return Math.min(...this.processes.map(p => p._nextRunTime));
-  }
-
-  _gatherInputs(process) {
-    const inputs = {};
-    for (const [portName, storePath] of Object.entries(process.ports)) {
-      inputs[portName] = this.store.get(storePath);
-    }
-    return inputs;
-  }
-
-  _applyOutputs(process, outputs) {
-    if (!outputs) return;
-    for (const [portName, newValue] of Object.entries(outputs)) {
-      if (newValue === undefined || newValue === null) continue;
-      const storePath = process.ports[portName];
-      if (!storePath) continue;
-      this.store.set(storePath, newValue);
-    }
-  }
-
-  _recordHistory() {
     this._history.time.push(this._time);
     for (const path of this._trackPaths) {
       const key = path.join('.');
@@ -357,14 +528,58 @@ class Vivarium {
       this._history[key].push(val !== undefined ? val : null);
     }
   }
+
+  /**
+   * Run for `totalTime` time units.
+   * @param {number} totalTime
+   * @param {number} [maxSteps=100000]
+   * @returns {Object}  { time: [...], 'path.key': [...], ... }
+   */
+  run(totalTime, maxSteps = 100000) {
+    const end = this._time + totalTime;
+    let n = 0;
+    while (this._time < end - 1e-10 && n < maxSteps) { this.step(); n++; }
+    return this.getHistory();
+  }
+
+  /** Return a copy of recorded history */
+  getHistory() { return _hDeepCopy(this._history); }
+
+  /** Return current store state */
+  getState() { return this.store.getState(); }
 }
 
-/* ─── Exports ────────────────────────────────────────────────────────────── */
-
-// Browser: expose as window.MiniVivarium
-// Node.js / test runner: expose via module.exports
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { Store, Process, Compartment, Vivarium };
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+if (typeof module !== 'undefined') {
+  module.exports = {
+    // Simulation-based API
+    Store,
+    Process,
+    Compartment,
+    Simulation,
+    buildBacterialGrowthCompartment,
+    buildGeneExpressionCompartment,
+    buildMetabolicCompartment,
+    // Vivarium event-driven API
+    HierarchicalStore,
+    SimProcess,
+    Vivarium,
+  };
 } else if (typeof window !== 'undefined') {
-  window.MiniVivarium = { Store, Process, Compartment, Vivarium };
+  window.VivFramework = {
+    // Simulation-based API
+    Store,
+    Process,
+    Compartment,
+    Simulation,
+    buildBacterialGrowthCompartment,
+    buildGeneExpressionCompartment,
+    buildMetabolicCompartment,
+    // Vivarium event-driven API
+    HierarchicalStore,
+    SimProcess,
+    Vivarium,
+  };
 }
